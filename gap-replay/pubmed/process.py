@@ -42,16 +42,18 @@ MAIN_SECTION_HEADERS = [
     'Tables', 'Figures', 'Appendix'
 ]
 
-def detect_lang(text, sample_size=2000): 
+def detect_lang(text, start_pos=0, sample_size=2000):
+    # start_pos=4000
     '''
     Helper: Detect language of a given text.
     '''
+    sample = None
     try:
-        sample = text if len(text) < sample_size else text[:sample_size]
+        sample = text if len(text) < (sample_size+start_pos) else text[start_pos:start_pos+sample_size]
         language = detect(sample)
     except:
         language = 'unknown'
-    return language
+    return language, sample
 
 def remove_urls(text):
     '''
@@ -391,9 +393,12 @@ def process_s2orc(source_path, save_path, start=None, end=None):
             os.remove(save_path)
     count = 0
     skipped = 0
-    non_english = 0
     duplicates = 0
     total = 0
+    no_content = 0
+    no_text = 0
+    non_english = 0
+    cant_load = 0
     with open(source_path, 'r') as f_in, open(save_path, 'a') as f_out:
         for line in tqdm(f_in):
             if start and count <= start:
@@ -406,22 +411,29 @@ def process_s2orc(source_path, save_path, start=None, end=None):
                 record = json.loads(line)
                 content = record.get('content')
                 if not content:
+                    no_content += 1
+                    # print(f"no content {no_content} out of {count}")
                     skipped += 1
                     continue
                 text = content.get('text')
                 if not text:
+                    no_text += 1
+                    # print(f"no text {no_text} out of {count}")
                     skipped += 1
                     continue
 
                 # Filter non-english articles
-                language = detect_lang(text)
+                language, sample = detect_lang(text)
                 if language != 'en':
                     non_english += 1
+                    # print(f"not english {non_english} out of {count}")
                     continue
 
                 # Format article
                 text = format_article(record)
                 if not text:
+                    no_format += 1
+                    # print(f"cannot format {no_format} out of {count}")
                     skipped += 1
                     continue
 
@@ -435,7 +447,15 @@ def process_s2orc(source_path, save_path, start=None, end=None):
                 record.pop('content')
                 f_out.write(json.dumps(record) + '\n')
                 count += 1
+                if count % 100000 == 0:
+                    print(f"no content {no_content} out of {count}")
+                    print(f"no text {no_text} out of {count}")
+                    print(f"not english {non_english} out of {count}")
+                    print(f"cannot format {no_format} out of {count}")
+                    print(f"cannot load {cant_load} out of {count}")
             except:
+                cant_load += 1
+                # print(f"cannot load {cant_load} out of {count}")
                 skipped += 1
                 continue
     print(f'Finished processing {count} out of {total} articles\
@@ -457,6 +477,7 @@ def process_abstracts(source_path, save_path, start=None, end=None):
     count = 0
     non_english = 0
     duplicates = 0
+    skipped = 0 # JW added
     corpus_ids = set()
     with open(source_path, 'r') as f_in, open(save_path, 'a') as f_out:
         for line in tqdm(f_in):
@@ -482,7 +503,7 @@ def process_abstracts(source_path, save_path, start=None, end=None):
                     continue
 
                 # Filter non-english abstracts
-                language = detect_lang(text)
+                language, sample = detect_lang(text)
                 if language != 'en':
                     non_english += 1
                     continue
@@ -546,7 +567,53 @@ def train_test_split(source_path, split_ratio=0.03):
                 f_train.write(line)
                 train += 1
     print(f'Split {train} articles into {train_path} and {test} articles into {test_path}.')
-            
+
+
+def get_random_jsonl_subset(source_path, output_path, subset_ratio=.07, n_docs=3):
+    '''
+    Get subset of jsonl file.
+    '''
+    subset = 0
+    with open(source_path, 'r') as f_in, open(output_path, 'a') as f_out:
+        for line in tqdm(f_in):
+            if np.random.random() < subset_ratio:
+                f_out.write(line)
+                subset += 1
+                # if subset == n_docs:
+                #     return
+    print(subset)
+
+
+def train_val_test_split(source_path, split_ratios=[.994,.003,.003], start_ind=5492835):
+    '''
+    Split a jsonl file into train, val and test sets.
+    '''
+    train_path = source_path.replace('.jsonl', '_train_pt2.jsonl')
+    val_path = source_path.replace('.jsonl', '_val.jsonl')
+    test_path = source_path.replace('.jsonl', '_test.jsonl')
+    print(f'\nSplitting {source_path} into {train_path}, {val_path} and {test_path}.\n')
+    train = 0
+    val = 0
+    test = 0
+    ss = 0
+    train_split, val_split, test_split = split_ratios
+    with open(source_path, 'r') as f_in, open(train_path, 'a') as f_train, open(val_path, 'a') as f_val, open(test_path, 'a') as f_test:
+        for line in tqdm(f_in):
+            ss += 1
+            if ss < start_ind:
+                continue
+            if np.random.random() < train_split:
+                f_train.write(line)
+                train += 1
+            else:
+                if np.random.random() < val_split/(val_split + test_split):
+                    f_val.write(line)
+                    val += 1
+                else:
+                    f_test.write(line)
+                    test += 1
+    print(f'Split {source_path} into:\n{train} train samples\n{val} validation samples\n{test} test samples\n')
+
 
 def combine(source_paths, save_path):
     '''
@@ -649,7 +716,8 @@ def main():
         return
     
     elif args.split:
-        train_test_split(args.source_path, args.split_ratio)
+        # train_test_split(args.source_path, args.split_ratio)
+        train_val_test_split(args.source_path)
         return
     
     elif args.split_s2orc:

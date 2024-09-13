@@ -2,7 +2,8 @@
 
 # Entire data pipeline for the GAP-Replay dataset. 
 
-DATA_PATH=/data/gap-replay
+#DATA_PATH=/data/gap-replay
+DATA_PATH=./dataset
 echo "GAP-Replay path: $DATA_PATH"
 
 echo "Downloading guidelines"

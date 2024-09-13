@@ -17,6 +17,7 @@ import gzip
 import shutil
 import argparse
 from tqdm import tqdm
+import numpy as np
 
 def get_s2orc_credentials(path='keys.json'):
     """
@@ -32,7 +33,8 @@ def get_links(dataset):
     '''
     Get all file links from the API.
     '''
-    headers = {'Accept': '*/*', 'x-api-key': API_KEY}
+    # headers = {'Accept': '*/*', 'x-api-key': API_KEY}
+    headers = {'Accept': '*/*', 'x-api-key': "LZ33iY2qtj8o6llYu9VPX8IGgvIUrObP3tIBtpC4"}
     dataset_url = f"https://api.semanticscholar.org/datasets/v1/release/latest/dataset/{dataset}"
     response = requests.get(dataset_url, headers=headers)
     links = response.json()["files"]
@@ -102,11 +104,12 @@ def extract_dataset(dataset_dir):
     print(f'\n2. Extracting all .gz files in {dataset_dir} to .jsonl format.\n')
     for i, gz_path in enumerate(gz_paths):
         file_path = gz_path[:-3] + ".jsonl"
-        print(f'[{i+1} | {len(gz_paths)}] Extracting file {gz_path} to .jsonl') 
-        with gzip.open(gz_path, 'rb') as f_in:
-            with open(file_path, 'wb') as f_out:
-                shutil.copyfileobj(f_in, f_out)
-        os.remove(gz_path)
+        if not os.path.exists(file_path): #JW
+            print(f'[{i+1} | {len(gz_paths)}] Extracting file {gz_path} to .jsonl') 
+            with gzip.open(gz_path, 'rb') as f_in:
+                with open(file_path, 'wb') as f_out:
+                    shutil.copyfileobj(f_in, f_out,4*1024)
+            os.remove(gz_path)
     print(f'Finished extracting {dataset_dir} files to .jsonl format.\n')
 
 def combine_dataset(dataset_dir, dataset):
@@ -119,12 +122,23 @@ def combine_dataset(dataset_dir, dataset):
         return
     print(f'\n3. Combining {len(paths)} .jsonl files in {dataset_dir} into a single file: {dataset_path}.\n')
     print(f"Creating {dataset_path}.")
-    with open(dataset_path, 'a') as f_out:
-        for i, path in enumerate(paths):
-            print(f'[{i+1} | {len(paths)}] Aggregating file {path}')
-            with open(path, 'r') as f_in:
-                for line in tqdm(f_in):
-                    f_out.write(line)
+    processed_files = []
+    if os.path.exists('/cb/datasets/language/scratch/mayo/pubmed/s2orc/combined_files.txt'):
+        with open('/cb/datasets/language/scratch/mayo/pubmed/s2orc/combined_files.txt','r') as fid:
+            for line in fid:
+                processed_files.append(line.strip())
+    
+    with open('/cb/datasets/language/scratch/mayo/pubmed/s2orc/combined_files.txt','a') as fid:
+        with open(dataset_path, 'a') as f_out:
+            for i, path in enumerate(paths):
+                if path not in processed_files:
+                    print(f'[{i+1} | {len(paths)}] Aggregating file {path}')
+                    with open(path, 'r') as f_in:
+                        for line in tqdm(f_in):
+                            f_out.write(line)
+                    fid.write(path+'\n')
+                else:
+                    print(f"skipping: {path}")
     print(f'Finished aggregating {dataset_dir} files into {dataset_path}.\n')
 
 def get_ids(dataset, article): 
@@ -154,6 +168,7 @@ def filter_pubmed(dataset_dir, dataset):
     Separate dataset into PubMed+PMC vs. non-PubMed articles.
     """
     dataset_path = os.path.join(dataset_dir, f"{dataset}.jsonl")
+    dataset_paths = [os.path.join(dataset_dir,f"{dataset}_{ii}.jsonl") for ii in range(30)]
     if not os.path.exists(dataset_path):
         raise ValueError(f'Could not find {dataset} dataset at {dataset_path}.')
     pubmed_path = os.path.join(dataset_dir, f"{dataset}-PubMed.jsonl")
@@ -175,6 +190,41 @@ def filter_pubmed(dataset_dir, dataset):
                 other_count += 1
     print(f"Finished filtering {dataset} dataset into PubMed and non-PubMed articles.")
     print(f"Found {pubmed_count} PubMed articles and {other_count} non-PubMed articles.\n")
+
+def filter_pubmed_jw(dataset_dir, dataset, fn_ext=""): 
+    """
+    Separate dataset into PubMed+PMC vs. non-PubMed articles.
+    """
+    dataset_paths = [os.path.join(dataset_dir,f"{dataset}_{ii}.jsonl") for ii in np.arange(1,61)]
+
+    pubmed_path = os.path.join(dataset_dir, f"{dataset}-PubMed{fn_ext}.jsonl")
+    other_path = os.path.join(dataset_dir, f"{dataset}-nonPubMed{fn_ext}.jsonl")
+    if os.path.exists(pubmed_path) or os.path.exists(other_path):
+        return
+    # print(f'\n4. Filtering {dataset} dataset at {dataset_path} into PubMed and non-PubMed articles.\n')
+    pubmed_count = 0
+    other_count = 0
+    # with open(dataset_path, 'r') as f_in, open(pubmed_path, 'w') as f_pubmed, open(other_path, 'w') as f_other:
+    with open(pubmed_path, 'w') as f_pubmed, open(other_path, 'w') as f_other:
+        for dataset_path in dataset_paths:
+            print(dataset_path)
+            with open(dataset_path,'r') as f_in:
+                for line in tqdm(f_in):
+                    article = json.loads(line)
+                    pm_id, pmc_id = get_ids(dataset, article)
+                    if pmc_id is not None or pm_id is not None:
+                        f_pubmed.write(json.dumps(article) + "\n")
+                        pubmed_count += 1
+                    else: 
+                        f_other.write(json.dumps(article) + "\n")
+                        other_count += 1
+                    if pubmed_count % 1000 == 0:
+                        print(f"pubmed count = {pubmed_count}")
+                        print(f"other count = {other_count}")
+    print(f"Finished filtering {dataset} dataset into PubMed and non-PubMed articles.")
+    print(f"Found {pubmed_count} PubMed articles and {other_count} non-PubMed articles.\n")
+    return pubmed_path, other_path
+
 
 def filter_pubmed_corpus(data_path, dataset='abstracts'):
     """ 
@@ -221,6 +271,68 @@ def filter_pubmed_corpus(data_path, dataset='abstracts'):
     print(f"Found {pubmed_count} PubMed articles and {other_count} non-PubMed articles.\n")
 
 
+def filter_pubmed_corpus_jw(
+    data_path, 
+    dataset='abstracts',
+    papers_pm_path="/cb/datasets/language/scratch/mayo/pubmed/papers/papers-PubMed.jsonl",
+):
+    """ 
+    Separate dataset into PubMed+PMC vs. non-PubMed articles using papers corpus IDs.
+    """
+    dataset_dir = os.path.join(data_path, dataset)
+    dataset_paths = [os.path.join(dataset_dir,f"{dataset}_{ii}.jsonl") for ii in np.arange(1,61)]
+
+    pubmed_path = os.path.join(dataset_dir, f"{dataset}-PubMed.jsonl")
+    other_path = os.path.join(dataset_dir, f"{dataset}-nonPubMed.jsonl")
+    if os.path.exists(pubmed_path) or os.path.exists(other_path):
+        return None, None
+
+    if not os.path.exists(papers_pm_path):
+        raise ValueError(f'Could not find papers-PubMed dataset at {papers_pm_path}.')
+
+    # Get all corpus IDs from papers-PubMed data
+    print(f'\n4. Filtering {dataset} dataset at {papers_pm_path} corpus IDs.\n')
+    corpus_ids = set()
+    ss = 0
+    with open(papers_pm_path, 'r') as f_in:
+        for line in f_in:
+            ss += 1
+            if ss % 100000 == 0: print(ss)
+            try: 
+                article = json.loads(line)
+                corpus_ids.add(article.get('corpusid'))
+            except:
+                pass
+    print(f'Found {len(corpus_ids)} corpus IDs in papers-PubMed dataset.\n')
+    
+    # Filter dataset into PubMed and non-PubMed articles using corpus IDs
+    pubmed_count = 0
+    other_count = 0
+    ss = 0
+    # with open(dataset_path, 'r') as f_in, open(pubmed_path, 'w') as f_pubmed, open(other_path, 'w') as f_other:
+    with open(pubmed_path, 'w') as f_pubmed, open(other_path, 'w') as f_other:
+        for dataset_path in dataset_paths:
+            print(dataset_path)
+            with open(dataset_path,'r') as f_in:
+                for line in tqdm(f_in):
+                    ss += 1
+                    if ss % 100000 == 0:
+                        print(f"completed: {ss}, PubMed: {pubmed_count}, NonPubMed: {other_count}")
+                    article = json.loads(line)
+                    corpus_id = article.get('corpusid')
+                    if corpus_id in corpus_ids:
+                        f_pubmed.write(json.dumps(article) + "\n")
+                        pubmed_count += 1
+                    else: 
+                        f_other.write(json.dumps(article) + "\n")
+                        other_count += 1
+            
+    print(f"Finished filtering {dataset} dataset into PubMed and non-PubMed articles.")
+    print(f"Found {pubmed_count} PubMed articles and {other_count} non-PubMed articles.\n")
+
+    return pubmed_path, other_path
+
+
 def join_metadata(papers_pm_path, dataset_pm_path): 
     """ Join PubMed articles (from s2orc or abstracts) with metadata from papers dataset. """
     print(f'\n5. Joining {dataset_pm_path} with metadata from {papers_pm_path}.\n')
@@ -250,33 +362,42 @@ def join_metadata(papers_pm_path, dataset_pm_path):
                 count += 1
     print(f'Finished joining {dataset_pm_path} with metadata from {papers_pm_path}.\n')
     print(f'Joined {count} articles out of {total}.\n')
+    return out_path
 
 
-def data_pipeline(data_path, dataset):
+def data_pipeline(data_path, dataset,fn_ext=""):
     """ Run the full data pipeline for a given dataset. """
     print(f'\nData pipeline entered for {dataset} dataset.\n')
 
+
     # 1. Load dataset from API into dataset_dir
     dataset_dir = os.path.join(data_path, dataset)
-    download_dataset(data_path, dataset)
 
-    # 2. Extract all .gz files to .jsonl format (if necessary)
-    extract_dataset(dataset_dir)
+    if False:
+        download_dataset(data_path, dataset)
 
-    # 3. Aggregate all .jsonl files for dataset into a single file
-    combine_dataset(dataset_dir, dataset)
+        # 2. Extract all .gz files to .jsonl format (if necessary)
+        extract_dataset(dataset_dir)
 
-    # 4. Keep only PubMed or PMC articles for the given dataset
-    filter_pubmed(dataset_dir, dataset)
+        # 3. Aggregate all .jsonl files for dataset into a single file
+        combine_dataset(dataset_dir, dataset)
+
+        # 4. Keep only PubMed or PMC articles for the given dataset
+        # dataset_pm_path, other_path = filter_pubmed_jw(dataset_dir, dataset, fn_ext=fn_ext)
+        dataset_pm_path, other_path = filter_pubmed_corpus_jw(data_path)
+
+    # filter_pubmed(dataset_dir, dataset)
+
 
     # 5. Join PubMed articles with metadata from papers dataset
-    papers_pm_path = os.path.join(data_path, 'papers', 'papers-PubMed.jsonl')
+    # papers_pm_path = os.path.join(data_path, 'papers', f'papers-PubMed.jsonl')
+    papers_pm_path = "/cb/datasets/language/scratch/mayo/pubmed/papers/papers-PubMed.jsonl"
     dataset_pm_path = os.path.join(dataset_dir, f'{dataset}-PubMed.jsonl')
     if dataset in ['s2orc', 'abstracts']:
-        join_metadata(papers_pm_path, dataset_pm_path)
+        dataset_meta_path = join_metadata(papers_pm_path, dataset_pm_path)
 
     # 6. Adapt abtracts keys
-    dataset_meta_path = os.path.join(dataset_dir, f'{dataset}-PubMed_metadata.jsonl')
+    # dataset_meta_path = os.path.join(dataset_dir, f'{dataset}-PubMed_metadata.jsonl')
     tmp_path = dataset_meta_path + '.tmp'
     if dataset == 'abstracts': 
         with open(dataset_meta_path, 'r') as f_in, open(tmp_path, 'w') as f_out:
@@ -328,6 +449,15 @@ def main():
         print(f'\nData pipeline entered for {dataset} dataset.\n')
         data_pipeline(args.data_path, dataset)
 
+def run():
+    # data_pipeline('/cb/datasets/language/scratch/mayo/pubmed/','s2orc')
+    data_pipeline(
+        '/cb/datasets/language/scratch/mayo/pubmed_test/',
+        'abstracts',
+        fn_ext="",
+    )
 
 if __name__ == "__main__":
-    main()
+    # main()
+    run()
+

@@ -1,3 +1,4 @@
+import os
 import random
 from pathlib import Path
 from functools import partial
@@ -9,9 +10,11 @@ from tqdm.auto import tqdm
 from torch.utils.data import IterableDataset
 from sentencepiece import SentencePieceProcessor
 
+dir_path = os.path.dirname(os.path.realpath(__file__))
 
 def load(name: str, data_dir: str, explicit_datadir: bool = False, **kwargs):
     if explicit_datadir:
+        import pdb; pdb.set_trace()
         return datasets.load_dataset(name, data_dir=data_dir, **kwargs)
     return datasets.load_dataset(name, data_dir, **kwargs)
 
@@ -234,7 +237,7 @@ class StarcoderDataset(Collection):
     def __init__(self, ignore_git: bool = False, jupyter_only: bool = False,
             cache_dir: Optional[Path] = None, streaming: bool = False):
         # get langlist
-        with open("starcoder.txt") as f:
+        with open(os.path.join(dir_path,"starcoder.txt")) as f:
             langs = list(map(lambda line: line.strip(), f))
         if ignore_git:
             langs = list(filter(lambda lang: "git" not in lang, langs))
