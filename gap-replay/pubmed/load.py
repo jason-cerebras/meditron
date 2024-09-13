@@ -33,8 +33,7 @@ def get_links(dataset):
     '''
     Get all file links from the API.
     '''
-    # headers = {'Accept': '*/*', 'x-api-key': API_KEY}
-    headers = {'Accept': '*/*', 'x-api-key': "LZ33iY2qtj8o6llYu9VPX8IGgvIUrObP3tIBtpC4"}
+    headers = {'Accept': '*/*', 'x-api-key': API_KEY}
     dataset_url = f"https://api.semanticscholar.org/datasets/v1/release/latest/dataset/{dataset}"
     response = requests.get(dataset_url, headers=headers)
     links = response.json()["files"]
